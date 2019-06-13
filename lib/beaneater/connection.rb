@@ -62,6 +62,8 @@ class Beaneater
     # Send commands to beanstalkd server via connection.
     #
     # @param [Hash{String => String, Number}>] options Retained for compatibility
+    # @option options [Proc] job_parser tube-scoped job parser
+    # @option options [Beaneater::Tube] tube tube instance context
     # @param [String] command Beanstalkd command
     # @return [Array<Hash{String => String, Number}>] Beanstalkd command response
     # @example
@@ -77,7 +79,7 @@ class Beaneater
           command = command.force_encoding('ASCII-8BIT') if command.respond_to?(:force_encoding)
           connection.write(command.to_s + "\r\n")
           res = connection.readline
-          parse_response(command, res)
+          parse_response(command, res, options)
         end
       end
     end
@@ -135,13 +137,19 @@ class Beaneater
     #
     # @param [String] cmd Beanstalk command transmitted
     # @param [String] res Telnet command response
+    # @param [Hash] options tube-scoped parser or tube context.
+    # @option options [Proc] job_parser tube instance's job parser
+    # @option options [Beaneater::Tube] tube tube instance's context
     # @return [Array<Hash{String => String, Number}>] Beanstalk response with `status`, `id`, `body`
     # @raise [Beaneater::UnexpectedResponse] Response from beanstalk command was an error status
     # @example
     #  parse_response("delete 56", "DELETED 56\nFOO")
     #   # => { :body => "FOO", :status => "DELETED", :id => 56 }
     #
-    def parse_response(cmd, res)
+    def parse_response(cmd, res, options)
+      parser_proc = options[:job_parser] || config.job_parser
+      tube_context = options[:tube]
+
       status = res.chomp
       body_values = status.split(/\s/)
       status = body_values[0]
@@ -150,7 +158,13 @@ class Beaneater
       if ['OK','FOUND', 'RESERVED'].include?(status)
         bytes_size = body_values[-1].to_i
         raw_body = connection.read(bytes_size)
-        body = status == 'OK' ? YAML.load(raw_body) : config.job_parser.call(raw_body)
+        body =
+          if status == 'OK'
+            YAML.load(raw_body)
+          else
+            # capability for old version
+            parser_proc.arity == 1 ? parser_proc.call(raw_body) : parser_proc.call(raw_body, tube_context)
+          end
         crlf = connection.read(2) # \r\n
         raise ExpectedCrlfError.new('EXPECTED_CRLF', cmd) if crlf != "\r\n"
       end
