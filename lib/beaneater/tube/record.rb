@@ -8,6 +8,12 @@ class Beaneater
     #   @return [Beaneater] returns the client instance
     attr_reader :name, :client
 
+    # @!attribute job_parser
+    #   @return [Proc, nil] tube-scoped job parser
+    # @!attribute job_serializer
+    #   @return [Proc, nil] tube scoped job serializer
+    attr_accessor :job_parser, :job_serializer
+
     # Fetches the specified tube.
     #
     # @param [Beaneater] client The beaneater client instance.
@@ -19,12 +25,20 @@ class Beaneater
       @client = client
       @name = name.to_s
       @mutex = Mutex.new
+
+      @job_parser = nil
+      @job_serializer = nil
     end
 
     # Delegates transmit to the connection object.
+    # @param [Hash] options tube-scoped parser or tube context to connection.
+    # @option options [Proc] job_parser tube-scoped job parser
+    # @option options [Beaneater::Tube] tube tube instance context
     #
     # @see Beaneater::Connection#transmit
     def transmit(command, options={})
+      options[:job_parser] = @job_parser
+      options[:tube] = self
       client.connection.transmit(command, options)
     end
 
@@ -42,7 +56,15 @@ class Beaneater
     # @api public
     def put(body, options={})
       safe_use do
-        serialized_body = config.job_serializer.call(body)
+        serializer_proc =  @job_serializer || config.job_serializer
+        serialized_body =
+          case serializer_proc.arity
+          when 1
+            # capability for old version
+            serializer_proc.call(body)
+          when 2
+            serializer_proc.call(body, self)
+          end
 
         options = {
           :pri   => config.default_put_pri,

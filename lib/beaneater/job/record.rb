@@ -20,8 +20,17 @@ class Beaneater
     def initialize(client, res)
       @client     = client
       @id         = res[:id]
-      @body       = res[:body]
+      @raw_body   = res[:raw_body]
       @reserved   = res[:status] == 'RESERVED'
+      if @client
+          @tube       = self.stats.tube
+          @tube_context = client.tubes.select{|tube| tube.name == @tube.to_s }[0]
+      end
+
+      parser_proc = @tube_context&.job_parser || config.job_parser
+      @body       =
+        res[:body] ||
+          (parser_proc.arity == 1 ? parser_proc.call(@raw_body) : parser_proc.call(@raw_body, @tube_context))
     end
 
     # Sends command to bury a reserved job.
@@ -220,5 +229,11 @@ class Beaneater
       transmit(cmd, &block)
     end
 
+    # Returns configuration options for beaneater
+    #
+    # @return [Beaneater::Configuration] configuration object
+    def config
+      Beaneater.configuration
+    end
   end # Job
 end # Beaneater

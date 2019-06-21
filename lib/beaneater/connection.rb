@@ -1,5 +1,6 @@
 require 'yaml'
 require 'socket'
+require 'pry'
 
 class Beaneater
   # Represents a connection to a beanstalkd instance.
@@ -145,18 +146,21 @@ class Beaneater
       status = res.chomp
       body_values = status.split(/\s/)
       status = body_values[0]
+
       raise UnexpectedResponse.from_status(status, cmd) if UnexpectedResponse::ERROR_STATES.include?(status)
       body = nil
       if ['OK','FOUND', 'RESERVED'].include?(status)
         bytes_size = body_values[-1].to_i
         raw_body = connection.read(bytes_size)
-        body = status == 'OK' ? YAML.load(raw_body) : config.job_parser.call(raw_body)
         crlf = connection.read(2) # \r\n
         raise ExpectedCrlfError.new('EXPECTED_CRLF', cmd) if crlf != "\r\n"
+        body =
+          status == 'OK' ? YAML.safe_load(raw_body) : nil
       end
       id = body_values[1]
       response = { :status => status }
       response[:id] = id if id
+      response[:raw_body] = raw_body if raw_body
       response[:body] = body if body
       response
     end
