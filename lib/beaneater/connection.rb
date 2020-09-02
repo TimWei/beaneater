@@ -1,6 +1,5 @@
 require 'yaml'
 require 'socket'
-require 'pry'
 
 class Beaneater
   # Represents a connection to a beanstalkd instance.
